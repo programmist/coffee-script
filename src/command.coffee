@@ -80,6 +80,15 @@ exports.run = ->
   for source in sources
     compilePath source, yes, path.normalize source
 
+insertImports = (file, code, imports) ->
+  dir = path.dirname(file)
+  for imp in imports
+    importFile = path.join(dir,imp.split(/\s+/)[1])
+    console.log "Inserting import: #{importFile} into File: #{file}"
+    insertCode = fs.readFileSync(importFile, "utf8") + "\n"
+    code = code.replace(imp,insertCode)
+  return code
+
 # Compile a path, which could be a script or a directory. If a directory
 # is passed, recursively compile all '.coffee' extension source files in it
 # and all subdirectories.
@@ -107,14 +116,16 @@ compilePath = (source, topLevel, base) ->
           compilePath (path.join source, file), no, base
     else if topLevel or path.extname(source) is '.coffee'
       watch source, base if opts.watch
-      fs.readFile source, (err, code) ->
+      fs.readFile source, 'utf-8', (err, code) ->
         throw err if err and err.code isnt 'ENOENT'
         return if err?.code is 'ENOENT'
-        compileScript(source, code.toString(), base)
+        imports = code.match(/#import\s+\S+\.coffee/g)
+        if imports
+          code = insertImports(source,code,imports)
+        compileScript(source, code, base)
     else
       notSources[source] = yes
       removeSource source, base
-
 
 # Compile a single source script, containing the given code, according to the
 # requested options. If evaluating the script directly sets `__filename`,
@@ -198,9 +209,12 @@ watch = (source, base) ->
         return rewatch() if prevStats and stats.size is prevStats.size and
           stats.mtime.getTime() is prevStats.mtime.getTime()
         prevStats = stats
-        fs.readFile source, (err, code) ->
+        fs.readFile source, 'utf-8', (err, code) ->
           return watchErr err if err
-          compileScript(source, code.toString(), base)
+          imports = code.match(/#import\s+\S+\.coffee/g)
+          if imports
+            code = insertImports(source,code,imports)
+          compileScript(source, code, base)
           rewatch()
 
   try
