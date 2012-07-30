@@ -57,6 +57,7 @@ sourceCode   = []
 notSources   = {}
 watchers     = {}
 optionParser = null
+links = {}
 
 # Run `coffee` by parsing passed options and determining what action to take.
 # Many flags cause us to divert before compiling anything. Flags passed after
@@ -88,6 +89,16 @@ insertImports = (file, code, imports) ->
     insertCode = fs.readFileSync(importFile, "utf8") + "\n"
     code = code.replace(imp,insertCode)
   return code
+
+setDependants = (file, code, imports) ->
+  dir = path.dirname(file)
+  for imp in imports
+    importFile = path.join(dir,imp.split(/\s+/)[1])
+    arr = links[importFile]
+    if arr && arr.indexOf file < 0
+      arr.push file
+    else
+      links[importFile] = [file]
 
 # Compile a path, which could be a script or a directory. If a directory
 # is passed, recursively compile all '.coffee' extension source files in it
@@ -121,7 +132,8 @@ compilePath = (source, topLevel, base) ->
         return if err?.code is 'ENOENT'
         imports = code.match(/#import\s+\S+\.coffee/g)
         if imports
-          code = insertImports(source,code,imports)
+          setDependants source,code,imports
+          code = insertImports source,code,imports
         compileScript(source, code, base)
     else
       notSources[source] = yes
@@ -201,6 +213,12 @@ watch = (source, base) ->
         compileJoin()
     else throw e
 
+  compileDependentFile = (depFile) ->
+    depCode = fs.readFileSync(depFile, "utf8")
+    depImports = depCode.match(/#import\s+\S+\.coffee/g)
+    depCode = insertImports(depFile,depCode,depImports)
+    compileScript(depFile, depCode, path.dirname(depImports))
+
   compile = ->
     clearTimeout compileTimeout
     compileTimeout = wait 25, ->
@@ -211,8 +229,13 @@ watch = (source, base) ->
         prevStats = stats
         fs.readFile source, 'utf-8', (err, code) ->
           return watchErr err if err
+          dependentFiles = links[source]
+          if dependentFiles
+            for depFile in dependentFiles
+              compileDependentFile depFile
           imports = code.match(/#import\s+\S+\.coffee/g)
           if imports
+            setDependants source,code,imports
             code = insertImports(source,code,imports)
           compileScript(source, code, base)
           rewatch()
